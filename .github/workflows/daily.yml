@@ -1,0 +1,58 @@
+name: Thu thập dữ liệu X hằng ngày
+
+on:
+  schedule:
+    - cron: "0 1 * * *"   # 01:00 UTC = 08:00 giờ Việt Nam
+  workflow_dispatch:       # cho phép bấm chạy tay
+    inputs:
+      backfill:
+        description: "Lấy cả các bài cũ (dùng cho lần chạy đầu tiên)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: x-insights
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - name: Thu thập dữ liệu từ X
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          MAX_READS: "1500"
+          CHECK_FOLLOWING: "false"
+        run: python collector.py ${{ inputs.backfill && '--backfill' || '' }}
+
+      - name: Xuất dashboard.html
+        run: python export_html.py
+
+      - name: Lưu bản dashboard để tải về
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard
+          path: dashboard.html
+
+      - name: Lưu dữ liệu vào repo
+        run: |
+          git config user.name "x-insights-bot"
+          git config user.email "x-insights-bot@users.noreply.github.com"
+          git add xtracker.db dashboard.html
+          git diff --cached --quiet || (git commit -m "Cập nhật dữ liệu $(date -u +%F)" && git push)
